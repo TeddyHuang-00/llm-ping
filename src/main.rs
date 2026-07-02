@@ -429,8 +429,8 @@ struct Row {
     tok_s: String,
     #[tabled(rename = "Total")]
     total: String,
-    #[tabled(rename = "Chars")]
-    chars: usize,
+    #[tabled(rename = "Tokens")]
+    tokens: usize,
 }
 
 fn fmt_dur(d: Option<Duration>) -> String {
@@ -460,7 +460,29 @@ fn fmt_row(r: &ProbeResult) -> Row {
         gen_dur: fmt_dur(p.generation),
         tok_s: fmt_tput(r.tokens, p.generation),
         total: fmt_dur(Some(p.total)),
-        chars: r.chars,
+        tokens: r.tokens,
+    }
+}
+
+fn avg_row(results: &[&ProbeResult]) -> Row {
+    let n = results.len() as f64;
+    let avg = |f: fn(&Phases) -> Option<Duration>| -> Option<Duration> {
+        let sum: Duration = results.iter().filter_map(|r| f(&r.phases)).sum();
+        if sum.is_zero() { None } else { Some(sum.div_f64(n)) }
+    };
+    let total_tokens: usize = results.iter().map(|r| r.tokens).sum();
+    let total_gen: Duration = results.iter().filter_map(|r| r.phases.generation).sum();
+    Row {
+        req: "Avg".into(),
+        dns: fmt_dur(avg(|p| p.dns)),
+        tcp: fmt_dur(avg(|p| p.tcp)),
+        tls: fmt_dur(avg(|p| p.tls)),
+        http_fb: fmt_dur(avg(|p| p.http_first_byte)),
+        ttft: fmt_dur(avg(|p| p.ttft)),
+        gen_dur: fmt_dur(avg(|p| p.generation)),
+        tok_s: fmt_tput(total_tokens, Some(total_gen)),
+        total: fmt_dur(avg(|p| Some(p.total))),
+        tokens: (total_tokens as f64 / n).round() as usize,
     }
 }
 
@@ -540,19 +562,7 @@ async fn main() {
         return;
     }
 
-    let rows: Vec<Row> = results.iter().map(fmt_row).collect();
-    let mut table = Table::new(rows);
-    table.with(Style::modern());
-    log::info!("llm-ping — {} ({})", args.provider, url);
-    log::info!("model: {}, prompt: {} chars", model, args.prompt.len());
-    if args.warm > 0 {
-        log::info!("(warmup: {} requests not shown)", args.warm);
-    }
-    println!();
-    println!("{table}");
-    println!();
-
-    let ok_results: Vec<_> = results.iter().filter(|r| r.error.is_none()).collect();
+    let ok_results: Vec<_> = results.iter().filter(|r| r.error.is_none()).collect::<Vec<_>>();
     if ok_results.is_empty() {
         log::error!("All requests failed.");
         for r in &results {
@@ -563,32 +573,20 @@ async fn main() {
         return;
     }
 
-    let count = ok_results.len();
-    let avg_ttft = ok_results
-        .iter()
-        .filter_map(|r| r.phases.ttft)
-        .sum::<Duration>()
-        .as_secs_f64()
-        / count as f64;
-    let total_tokens: usize = ok_results.iter().map(|r| r.tokens).sum();
-    let total_gen: f64 = ok_results
-        .iter()
-        .filter_map(|r| r.phases.generation)
-        .sum::<Duration>()
-        .as_secs_f64();
-
-    let avg_tok_s = if total_gen > 0.0 {
-        total_tokens as f64 / total_gen
-    } else {
-        0.0
-    };
-
-    println!(
-        "avg TTFT: {:.1}ms  |  avg throughput: {:.1} tok/s  |  total tokens: {}",
-        avg_ttft * 1000.0,
-        avg_tok_s,
-        total_tokens,
-    );
+    let mut rows: Vec<Row> = results.iter().map(fmt_row).collect();
+    if ok_results.len() > 1 {
+        rows.push(avg_row(&ok_results));
+    }
+    let mut table = Table::new(rows);
+    table.with(Style::modern());
+    log::info!("llm-ping — {} ({})", args.provider, url);
+    log::info!("model: {}, prompt: {} chars", model, args.prompt.len());
+    if args.warm > 0 {
+        log::info!("(warmup: {} requests not shown)", args.warm);
+    }
+    println!();
+    println!("{table}");
+    println!();
 
     for r in &results {
         if let Some(ref e) = r.error {
