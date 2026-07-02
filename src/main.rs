@@ -520,10 +520,10 @@ async fn main() {
     let rows: Vec<Row> = results.iter().map(fmt_row).collect();
     let mut table = Table::new(rows);
     table.with(Style::modern());
-    println!("\nllm-ping — {} ({})", args.r#type, url);
-    println!("model: {}, prompt: {} chars", model, args.prompt.len());
+    log::info!("\nllm-ping — {} ({})", args.r#type, url);
+    log::info!("model: {}, prompt: {} chars", model, args.prompt.len());
     if args.warm > 0 {
-        println!("(warmup: {} requests not shown)", args.warm);
+        log::info!("(warmup: {} requests not shown)", args.warm);
     }
     println!();
     println!("{table}");
@@ -531,10 +531,10 @@ async fn main() {
 
     let ok_results: Vec<_> = results.iter().filter(|r| r.error.is_none()).collect();
     if ok_results.is_empty() {
-        println!("All requests failed.");
+        log::error!("All requests failed.");
         for r in &results {
             if let Some(ref e) = r.error {
-                println!("  #{}: {e}", r.n);
+                log::error!("  #{}: {e}", r.n);
             }
         }
         return;

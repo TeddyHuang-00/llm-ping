@@ -215,7 +215,7 @@ impl Provider for Anthropic {
 pub fn from_type(t: &str) -> Box<dyn Provider> {
     match t {
         "ollama" => Box::new(Ollama),
-        "openai" | "deepseek" | "openrouter" | "glm" | "kimi" | "siliconflow" | "gemini" => {
+        "openai" | "deepseek" | "openrouter" | "glm" | "zhipu" | "kimi" | "moonshot" | "siliconflow" | "gemini" => {
             Box::new(OpenAI)
         }
         "anthropic" => Box::new(Anthropic),
@@ -228,24 +228,12 @@ pub fn defaults(t: &str) -> (&str, &str) {
     match t {
         "ollama" => ("http://localhost:11434/api/chat", "gemma4:12b"),
         "openai" => ("https://api.openai.com/v1/chat/completions", "gpt-4o"),
-        "anthropic" => (
-            "https://api.anthropic.com/v1/messages",
-            "claude-sonnet-4-20250514",
-        ),
+        "anthropic" => ("https://api.anthropic.com/v1/messages", "claude-sonnet-4-20250514"),
         "deepseek" => ("https://api.deepseek.com/chat/completions", "deepseek-chat"),
         "openrouter" => ("https://openrouter.ai/api/v1/chat/completions", "auto"),
-        "glm" => (
-            "https://open.bigmodel.cn/api/paas/v4/chat/completions",
-            "glm-4-plus",
-        ),
-        "kimi" => (
-            "https://api.moonshot.cn/v1/chat/completions",
-            "moonshot-v1-auto",
-        ),
-        "siliconflow" => (
-            "https://api.siliconflow.cn/v1/chat/completions",
-            "Pro/deepseek-ai/DeepSeek-V3",
-        ),
+        "glm" | "zhipu" => ("https://open.bigmodel.cn/api/paas/v4/chat/completions", "glm-4-plus"),
+        "kimi" | "moonshot" => ("https://api.moonshot.cn/v1/chat/completions", "moonshot-v1-auto"),
+        "siliconflow" => ("https://api.siliconflow.cn/v1/chat/completions", "Pro/deepseek-ai/DeepSeek-V3"),
         _ => ("https://api.openai.com/v1/chat/completions", "gpt-4o"),
     }
 }
@@ -257,9 +245,9 @@ pub fn api_key_envs(t: &str) -> &[&str] {
         "anthropic" => &["ANTHROPIC_API_KEY"],
         "deepseek" => &["DEEPSEEK_API_KEY"],
         "openrouter" => &["OPENROUTER_API_KEY"],
-        "glm" => &["GLM_API_KEY", "ZHIPUAI_API_KEY"],
-        "kimi" => &["MOONSHOT_API_KEY", "KIMI_API_KEY"],
+        "glm" | "zhipu" => &["ZHIPUAI_API_KEY", "GLM_API_KEY"],
+        "kimi" | "moonshot" => &["MOONSHOT_API_KEY", "KIMI_API_KEY"],
         "siliconflow" => &["SILICONFLOW_API_KEY"],
-        _ => &[], // Ollama and unknown providers: no auth
+        _ => &[],
     }
 }
