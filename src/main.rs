@@ -48,7 +48,7 @@ struct Args {
     model: Option<String>,
 
     /// Prompt text
-    #[arg(short, long, default_value = "Say hello in one short sentence.")]
+    #[arg(short, long, default_value = "Introduce yourself in one short sentence.")]
     prompt: String,
 
     /// Number of requests
