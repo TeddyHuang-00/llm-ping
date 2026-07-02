@@ -39,13 +39,13 @@ struct Args {
     #[arg(short, long, default_value = "ollama")]
     r#type: String,
 
-    /// API endpoint URL
-    #[arg(short, long, default_value = "http://localhost:11434/api/chat")]
-    url: Url,
+    /// API endpoint URL (default from --type)
+    #[arg(short, long)]
+    url: Option<String>,
 
-    /// Model name
-    #[arg(short, long, default_value = "gemma4:12b")]
-    model: String,
+    /// Model name (default from --type)
+    #[arg(short, long)]
+    model: Option<String>,
 
     /// Prompt text
     #[arg(short, long, default_value = "Say hello in one short sentence.")]
@@ -197,11 +197,13 @@ async fn probe_once(
     args: &Args,
     dns_resolver: &TokioResolver,
     provider: &dyn Provider,
+    url: &Url,
+    model: &str,
     n: u32,
 ) -> ProbeResult {
     let t_start = Instant::now();
 
-    let (conn_timing, io) = match dial(&args.url, dns_resolver).await {
+    let (conn_timing, io) = match dial(url, dns_resolver).await {
         Ok(v) => v,
         Err(e) => {
             return ProbeResult {
@@ -228,8 +230,8 @@ async fn probe_once(
     };
     tokio::spawn(conn);
 
-    let body = provider.build_body(&args.model, &args.prompt, !args.no_stream);
-    let req = Request::post(args.url.as_str())
+    let body = provider.build_body(model, &args.prompt, !args.no_stream);
+    let req = Request::post(url.as_str())
         .header(CONTENT_TYPE, "application/json")
         .header("Accept", "text/event-stream");
 
@@ -239,8 +241,8 @@ async fn probe_once(
         req
     };
 
-    let host = args.url.host_str().unwrap_or("localhost");
-    let port = args.url.port_or_known_default().unwrap_or(80);
+    let host = url.host_str().unwrap_or("localhost");
+    let port = url.port_or_known_default().unwrap_or(80);
     let req = req.header("Host", format!("{host}:{port}"));
 
     let req = req
@@ -462,6 +464,14 @@ async fn main() {
     };
 
     let provider = provider::from_type(&args.r#type);
+    let (default_url, default_model) = provider::defaults(&args.r#type);
+    let url: Url = args
+        .url
+        .as_deref()
+        .unwrap_or(default_url)
+        .parse()
+        .expect("invalid URL");
+    let model: &str = args.model.as_deref().unwrap_or(default_model);
 
     let dns_resolver: TokioResolver = TokioResolver::builder_with_config(
         ResolverConfig::default(),
@@ -470,12 +480,12 @@ async fn main() {
     .build();
 
     for _ in 0..args.warm {
-        let _ = probe_once(&args, &dns_resolver, &*provider, 0).await;
+        let _ = probe_once(&args, &dns_resolver, &*provider, &url, model, 0).await;
     }
 
     let mut results = Vec::new();
     for n in 1..=args.count {
-        let r = probe_once(&args, &dns_resolver, &*provider, n).await;
+        let r = probe_once(&args, &dns_resolver, &*provider, &url, model, n).await;
         results.push(r);
 
         if args.flush_dns {
@@ -491,8 +501,8 @@ async fn main() {
     let rows: Vec<Row> = results.iter().map(fmt_row).collect();
     let mut table = Table::new(rows);
     table.with(Style::modern());
-    println!("\nllm-ping — {} ({})", args.r#type, args.url);
-    println!("model: {}, prompt: {} chars", args.model, args.prompt.len());
+    println!("\nllm-ping — {} ({})", args.r#type, url);
+    println!("model: {}, prompt: {} chars", model, args.prompt.len());
     if args.warm > 0 {
         println!("(warmup: {} requests not shown)", args.warm);
     }

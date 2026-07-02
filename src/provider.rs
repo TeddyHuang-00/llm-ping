@@ -215,9 +215,37 @@ impl Provider for Anthropic {
 pub fn from_type(t: &str) -> Box<dyn Provider> {
     match t {
         "ollama" => Box::new(Ollama),
-        "openai" => Box::new(OpenAI),
+        "openai" | "deepseek" | "openrouter" | "glm" | "kimi" | "siliconflow" | "gemini" => {
+            Box::new(OpenAI)
+        }
         "anthropic" => Box::new(Anthropic),
-        "gemini" => Box::new(OpenAI), // ponytail: Gemini uses OpenAI-compatible streaming format
-        _ => Box::new(OpenAI),        // ponytail: default to OpenAI-compatible
+        _ => Box::new(OpenAI), // ponytail: default to OpenAI-compatible
+    }
+}
+
+/// Default (URL, model) for a provider type. User can override both via CLI.
+pub fn defaults(t: &str) -> (&str, &str) {
+    match t {
+        "ollama" => ("http://localhost:11434/api/chat", "gemma4:12b"),
+        "openai" => ("https://api.openai.com/v1/chat/completions", "gpt-4o"),
+        "anthropic" => (
+            "https://api.anthropic.com/v1/messages",
+            "claude-sonnet-4-20250514",
+        ),
+        "deepseek" => ("https://api.deepseek.com/chat/completions", "deepseek-chat"),
+        "openrouter" => ("https://openrouter.ai/api/v1/chat/completions", "auto"),
+        "glm" => (
+            "https://open.bigmodel.cn/api/paas/v4/chat/completions",
+            "glm-4-plus",
+        ),
+        "kimi" => (
+            "https://api.moonshot.cn/v1/chat/completions",
+            "moonshot-v1-auto",
+        ),
+        "siliconflow" => (
+            "https://api.siliconflow.cn/v1/chat/completions",
+            "Pro/deepseek-ai/DeepSeek-V3",
+        ),
+        _ => ("https://api.openai.com/v1/chat/completions", "gpt-4o"),
     }
 }
