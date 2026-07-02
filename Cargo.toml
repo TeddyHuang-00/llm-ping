@@ -1,0 +1,28 @@
+[package]
+name = "llm-ping"
+version = "0.1.0"
+edition = "2024"
+description = "LLM API latency diagnostic — measures DNS, TCP, TLS, TTFT, and throughput"
+authors = ["Nan Huang <teddyhuangnan@gmail.com>"]
+license = "MIT"
+
+[dependencies]
+clap = { version = "4", features = ["derive", "string", "cargo", "color", "wrap_help"] }
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+url = "2"
+tabled = "0.21"
+hyper = { version = "1", features = ["client", "http1"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+http-body-util = "0.1"
+bytes = "1"
+hickory-resolver = "0.25"
+log = "0.4"
+simple_logger = "5.0.0"
+rustls = "0.23"
+tokio-rustls = "0.26"
+tokio-util = { version = "0.7", features = ["io"] }
+
+[lints.clippy]
+nursery = "warn"
