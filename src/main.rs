@@ -75,6 +75,10 @@ struct Args {
     #[arg(long)]
     json: bool,
 
+    /// Dry run: print request details without sending
+    #[arg(long)]
+    dry_run: bool,
+
     #[allow(dead_code)]
     /// Request timeout in seconds
     #[arg(long, default_value_t = 60)]
@@ -456,9 +460,10 @@ async fn main() {
 
     let args = Args {
         api_key: args.api_key.clone().or_else(|| {
-            std::env::var("OPENAI_API_KEY")
-                .ok()
-                .or_else(|| std::env::var("ANTHROPIC_API_KEY").ok())
+            provider::api_key_envs(&args.r#type)
+                .iter()
+                .filter_map(|name| std::env::var(name).ok())
+                .next()
         }),
         ..args
     };
@@ -472,6 +477,20 @@ async fn main() {
         .parse()
         .expect("invalid URL");
     let model: &str = args.model.as_deref().unwrap_or(default_model);
+
+    if args.dry_run {
+        let body = provider.build_body(model, &args.prompt, !args.no_stream);
+        let masked_key = args.api_key.as_ref().map(|k| {
+            let n = k.len().saturating_sub(8);
+            format!("{}...{}", &k[..4], &k[n..])
+        });
+        println!("type:      {}", args.r#type);
+        println!("url:       {url}");
+        println!("model:     {model}");
+        println!("api_key:   {}", masked_key.as_deref().unwrap_or("(none)"));
+        println!("body:\n{body}");
+        return;
+    }
 
     let dns_resolver: TokioResolver = TokioResolver::builder_with_config(
         ResolverConfig::default(),

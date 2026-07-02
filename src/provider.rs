@@ -249,3 +249,17 @@ pub fn defaults(t: &str) -> (&str, &str) {
         _ => ("https://api.openai.com/v1/chat/completions", "gpt-4o"),
     }
 }
+
+/// Environment variable names to try for a provider's API key, in priority order.
+pub fn api_key_envs(t: &str) -> &[&str] {
+    match t {
+        "openai" => &["OPENAI_API_KEY"],
+        "anthropic" => &["ANTHROPIC_API_KEY"],
+        "deepseek" => &["DEEPSEEK_API_KEY"],
+        "openrouter" => &["OPENROUTER_API_KEY"],
+        "glm" => &["GLM_API_KEY", "ZHIPUAI_API_KEY"],
+        "kimi" => &["MOONSHOT_API_KEY", "KIMI_API_KEY"],
+        "siliconflow" => &["SILICONFLOW_API_KEY"],
+        _ => &[], // Ollama and unknown providers: no auth
+    }
+}
