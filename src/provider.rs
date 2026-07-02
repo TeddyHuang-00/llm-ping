@@ -210,44 +210,156 @@ impl Provider for Anthropic {
     }
 }
 
-// ── Factory ─────────────────────────────────────────────────────────────────
+// ── Factory + defaults ──────────────────────────────────────────────────────
 
 pub fn from_type(t: &str) -> Box<dyn Provider> {
     match t {
         "ollama" => Box::new(Ollama),
-        "openai" | "deepseek" | "openrouter" | "glm" | "zhipu" | "kimi" | "moonshot" | "siliconflow" | "gemini" => {
-            Box::new(OpenAI)
-        }
+        "openai" | "deepseek" | "openrouter" | "gemini" | "google" | "glm" | "zhipu"
+        | "zhipuai" | "zai" | "kimi" | "moonshot" | "moonshotai" | "kimi-cn" | "moonshotai-cn"
+        | "siliconflow" | "siliconflow-cn" | "alibaba" | "alibaba-cn" | "minimax"
+        | "minimax-cn" | "groq" | "together" | "togetherai" | "deepinfra" | "fireworks-ai"
+        | "stepfun" | "xai" | "perplexity" | "mistral" | "cohere" | "cerebras" | "nebius"
+        | "novita-ai" | "friendli" | "nvidia" | "sambanova" => Box::new(OpenAI),
         "anthropic" => Box::new(Anthropic),
-        _ => Box::new(OpenAI), // ponytail: default to OpenAI-compatible
+        _ => Box::new(OpenAI),
     }
 }
 
-/// Default (URL, model) for a provider type. User can override both via CLI.
+/// Default (URL, model). Canonical names from models.dev community database.
 pub fn defaults(t: &str) -> (&str, &str) {
     match t {
-        "ollama" => ("http://localhost:11434/api/chat", "gemma4:12b"),
+        "ollama" => ("http://127.0.0.1:11434/v1/chat/completions", "gemma4:12b"),
         "openai" => ("https://api.openai.com/v1/chat/completions", "gpt-4o"),
-        "anthropic" => ("https://api.anthropic.com/v1/messages", "claude-sonnet-4-20250514"),
-        "deepseek" => ("https://api.deepseek.com/chat/completions", "deepseek-chat"),
+        "anthropic" => (
+            "https://api.anthropic.com/v1/messages",
+            "claude-sonnet-4-20250514",
+        ),
+        "deepseek" => (
+            "https://api.deepseek.com/v1/chat/completions",
+            "deepseek-v4-flash",
+        ),
         "openrouter" => ("https://openrouter.ai/api/v1/chat/completions", "auto"),
-        "glm" | "zhipu" => ("https://open.bigmodel.cn/api/paas/v4/chat/completions", "glm-4-plus"),
-        "kimi" | "moonshot" => ("https://api.moonshot.cn/v1/chat/completions", "moonshot-v1-auto"),
-        "siliconflow" => ("https://api.siliconflow.cn/v1/chat/completions", "Pro/deepseek-ai/DeepSeek-V3"),
+        "gemini" | "google" => (
+            "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+            "gemini-2.0-flash",
+        ),
+        "glm" | "zhipu" | "zhipuai" => (
+            "https://open.bigmodel.cn/api/paas/v4/chat/completions",
+            "glm-4-plus",
+        ),
+        "zai" => (
+            "https://api.z.ai/api/paas/v4/chat/completions",
+            "glm-4-plus",
+        ),
+        "kimi" | "moonshot" | "moonshotai" => (
+            "https://api.moonshot.cn/v1/chat/completions",
+            "kimi-k2.7-code",
+        ),
+        "kimi-cn" | "moonshotai-cn" => (
+            "https://api.moonshot.cn/v1/chat/completions",
+            "kimi-k2.7-code-highspeed",
+        ),
+        "siliconflow" => (
+            "https://api.siliconflow.cn/v1/chat/completions",
+            "moonshotai/Kimi-K2.6",
+        ),
+        "siliconflow-cn" => (
+            "https://api.siliconflow.cn/v1/chat/completions",
+            "baidu/ERNIE-4.5-300B-A47B",
+        ),
+        "alibaba" | "alibaba-cn" => (
+            "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
+            "qwen3-coder-plus",
+        ),
+        "minimax" => (
+            "https://api.minimax.chat/v1/chat/completions",
+            "MiniMax-M2.1",
+        ),
+        "minimax-cn" => (
+            "https://api.minimax.chat/v1/chat/completions",
+            "MiniMax-M2.1",
+        ),
+        "groq" => (
+            "https://api.groq.com/openai/v1/chat/completions",
+            "llama-3.3-70b-versatile",
+        ),
+        "together" | "togetherai" => (
+            "https://api.together.xyz/v1/chat/completions",
+            "meta-llama/Llama-3.3-70B-Instruct",
+        ),
+        "deepinfra" => (
+            "https://api.deepinfra.com/v1/openai/chat/completions",
+            "meta-llama/Llama-3.3-70B-Instruct",
+        ),
+        "fireworks-ai" => (
+            "https://api.fireworks.ai/inference/v1/chat/completions",
+            "accounts/fireworks/models/llama-v3p3-70b-instruct",
+        ),
+        "stepfun" => ("https://api.stepfun.ai/v1/chat/completions", "step-1-32k"),
+        "xai" => ("https://api.x.ai/v1/chat/completions", "grok-4"),
+        "perplexity" => ("https://api.perplexity.ai/chat/completions", "sonar-pro"),
+        "mistral" => (
+            "https://api.mistral.ai/v1/chat/completions",
+            "codestral-latest",
+        ),
+        "cohere" => ("https://api.cohere.ai/v1/chat/completions", "command-a"),
+        "cerebras" => ("https://api.cerebras.ai/v1/chat/completions", "llama3.1-8b"),
+        "nebius" => (
+            "https://api.studio.nebius.ai/v1/chat/completions",
+            "meta-llama/Meta-Llama-3.3-70B-Instruct",
+        ),
+        "novita-ai" => (
+            "https://api.novita.ai/v1/chat/completions",
+            "meta-llama/llama-3.1-8b-instruct",
+        ),
+        "friendli" => (
+            "https://inference.friendli.ai/openai/v1/chat/completions",
+            "google/gemma-4-31B-it",
+        ),
+        "nvidia" => (
+            "https://integrate.api.nvidia.com/v1/chat/completions",
+            "meta/llama-3.3-70b-instruct",
+        ),
+        "sambanova" => (
+            "https://api.sambanova.ai/v1/chat/completions",
+            "Meta-Llama-3.3-70B-Instruct",
+        ),
         _ => ("https://api.openai.com/v1/chat/completions", "gpt-4o"),
     }
 }
 
-/// Environment variable names to try for a provider's API key, in priority order.
+/// API key env vars per provider (models.dev + Hermes overlays).
 pub fn api_key_envs(t: &str) -> &[&str] {
     match t {
         "openai" => &["OPENAI_API_KEY"],
-        "anthropic" => &["ANTHROPIC_API_KEY"],
+        "anthropic" => &["ANTHROPIC_API_KEY", "ANTHROPIC_TOKEN"],
         "deepseek" => &["DEEPSEEK_API_KEY"],
         "openrouter" => &["OPENROUTER_API_KEY"],
-        "glm" | "zhipu" => &["ZHIPUAI_API_KEY", "GLM_API_KEY"],
-        "kimi" | "moonshot" => &["MOONSHOT_API_KEY", "KIMI_API_KEY"],
-        "siliconflow" => &["SILICONFLOW_API_KEY"],
+        "gemini" | "google" => &["GEMINI_API_KEY", "GOOGLE_API_KEY"],
+        "glm" | "zhipu" | "zhipuai" => &["ZHIPUAI_API_KEY", "GLM_API_KEY"],
+        "zai" => &["GLM_API_KEY", "ZAI_API_KEY", "Z_AI_API_KEY"],
+        "kimi" | "moonshot" | "moonshotai" => &["MOONSHOT_API_KEY", "KIMI_API_KEY"],
+        "kimi-cn" | "moonshotai-cn" => &["KIMI_CN_API_KEY"],
+        "siliconflow" | "siliconflow-cn" => &["SILICONFLOW_API_KEY"],
+        "alibaba" | "alibaba-cn" => &["ALIBABA_API_KEY", "DASHSCOPE_API_KEY"],
+        "minimax" => &["MINIMAX_API_KEY"],
+        "minimax-cn" => &["MINIMAX_CN_API_KEY"],
+        "groq" => &["GROQ_API_KEY"],
+        "together" | "togetherai" => &["TOGETHER_API_KEY"],
+        "deepinfra" => &["DEEPINFRA_API_KEY"],
+        "fireworks-ai" => &["FIREWORKS_API_KEY"],
+        "stepfun" => &["STEPFUN_API_KEY"],
+        "xai" => &["XAI_API_KEY"],
+        "perplexity" => &["PERPLEXITY_API_KEY"],
+        "mistral" => &["MISTRAL_API_KEY"],
+        "cohere" => &["COHERE_API_KEY"],
+        "cerebras" => &["CEREBRAS_API_KEY"],
+        "nebius" => &["NEBIUS_API_KEY"],
+        "novita-ai" => &["NOVITA_API_KEY"],
+        "friendli" => &["FRIENDLI_API_KEY"],
+        "nvidia" => &["NVIDIA_API_KEY"],
+        "sambanova" => &["SAMBA_API_KEY", "SAMBANOVA_API_KEY"],
         _ => &[],
     }
 }
