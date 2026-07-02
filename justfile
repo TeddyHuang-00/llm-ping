@@ -2,7 +2,7 @@
 format:
     cargo +nightly fmt --all
 
-# Clippy
+# Check for errors and auto-fix
 check: format
     cargo clippy --fix --allow-staged --all-targets
     @just format
@@ -13,4 +13,4 @@ test: check
 
 # Quick local test with Ollama
 run-local:
-    cargo run -- -t ollama -m gemma4:12b -p "Hi" -c 1
+    cargo run -- --provider ollama -m gemma4:12b -p "Hi" -c 1

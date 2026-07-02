@@ -48,7 +48,11 @@ struct Args {
     model: Option<String>,
 
     /// Prompt text
-    #[arg(short, long, default_value = "Introduce yourself in one short sentence.")]
+    #[arg(
+        short,
+        long,
+        default_value = "Introduce yourself in one short sentence."
+    )]
     prompt: String,
 
     /// Number of requests
@@ -78,6 +82,10 @@ struct Args {
     /// Dry run: print request details without sending
     #[arg(long)]
     dry_run: bool,
+
+    /// Verbose output (-v: debug, -vv: trace)
+    #[arg(short, long, action = clap::ArgAction::Count)]
+    verbose: u8,
 
     #[allow(dead_code)]
     /// Request timeout in seconds
@@ -403,15 +411,25 @@ async fn probe_once(
 
 #[derive(Tabled)]
 struct Row {
+    #[tabled(rename = "Req")]
     req: String,
+    #[tabled(rename = "DNS")]
     dns: String,
+    #[tabled(rename = "TCP")]
     tcp: String,
+    #[tabled(rename = "TLS")]
     tls: String,
+    #[tabled(rename = "HTTP FB")]
     http_fb: String,
+    #[tabled(rename = "TTFT")]
     ttft: String,
+    #[tabled(rename = "Gen")]
     gen_dur: String,
+    #[tabled(rename = "tok/s")]
     tok_s: String,
+    #[tabled(rename = "Total")]
     total: String,
+    #[tabled(rename = "Chars")]
     chars: usize,
 }
 
@@ -453,7 +471,11 @@ async fn main() {
     let args = Args::parse();
 
     simple_logger::SimpleLogger::new()
-        .with_level(log::LevelFilter::Info)
+        .with_level(match args.verbose {
+            0 => log::LevelFilter::Info,
+            1 => log::LevelFilter::Debug,
+            _ => log::LevelFilter::Trace,
+        })
         .env()
         .init()
         .ok();
@@ -521,7 +543,7 @@ async fn main() {
     let rows: Vec<Row> = results.iter().map(fmt_row).collect();
     let mut table = Table::new(rows);
     table.with(Style::modern());
-    log::info!("\nllm-ping — {} ({})", args.provider, url);
+    log::info!("llm-ping — {} ({})", args.provider, url);
     log::info!("model: {}, prompt: {} chars", model, args.prompt.len());
     if args.warm > 0 {
         log::info!("(warmup: {} requests not shown)", args.warm);
