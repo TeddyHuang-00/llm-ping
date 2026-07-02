@@ -28,22 +28,22 @@ use tokio_rustls::{
 use url::Url;
 
 mod provider;
-use provider::{ContentEvent, Provider, SseEvent, next_sse_event};
+use provider::{ContentEvent, Provider, ProviderKind, SseEvent, next_sse_event};
 
 // ── CLI ────────────────────────────────────────────────────────────────────
 
 #[derive(Parser, Debug)]
 #[command(name = "llm-ping", version, about = "LLM API latency diagnostic")]
 struct Args {
-    /// Provider type: ollama, openai, anthropic, gemini
-    #[arg(short, long, default_value = "ollama")]
-    r#type: String,
+    /// Provider type
+    #[arg(long, default_value = "ollama")]
+    provider: ProviderKind,
 
-    /// API endpoint URL (default from --type)
+    /// API endpoint URL (default from --provider)
     #[arg(short, long)]
     url: Option<String>,
 
-    /// Model name (default from --type)
+    /// Model name (default from --provider)
     #[arg(short, long)]
     model: Option<String>,
 
@@ -59,7 +59,7 @@ struct Args {
     #[arg(long, default_value_t = 0)]
     warm: u32,
 
-    /// API key (default: $OPENAI_API_KEY or $ANTHROPIC_API_KEY)
+    /// API key (default: provider-specific env var)
     #[arg(short = 'k', long)]
     api_key: Option<String>,
 
@@ -460,7 +460,8 @@ async fn main() {
 
     let args = Args {
         api_key: args.api_key.clone().or_else(|| {
-            provider::api_key_envs(&args.r#type)
+            args.provider
+                .api_key_envs()
                 .iter()
                 .filter_map(|name| std::env::var(name).ok())
                 .next()
@@ -468,8 +469,8 @@ async fn main() {
         ..args
     };
 
-    let provider = provider::from_type(&args.r#type);
-    let (default_url, default_model) = provider::defaults(&args.r#type);
+    let provider: Box<dyn Provider> = (&args.provider).into();
+    let (default_url, default_model) = args.provider.defaults();
     let url: Url = args
         .url
         .as_deref()
@@ -484,7 +485,7 @@ async fn main() {
             let n = k.len().saturating_sub(8);
             format!("{}...{}", &k[..4], &k[n..])
         });
-        println!("type:      {}", args.r#type);
+        println!("type:      {}", args.provider);
         println!("url:       {url}");
         println!("model:     {model}");
         println!("api_key:   {}", masked_key.as_deref().unwrap_or("(none)"));
@@ -520,7 +521,7 @@ async fn main() {
     let rows: Vec<Row> = results.iter().map(fmt_row).collect();
     let mut table = Table::new(rows);
     table.with(Style::modern());
-    log::info!("\nllm-ping — {} ({})", args.r#type, url);
+    log::info!("\nllm-ping — {} ({})", args.provider, url);
     log::info!("model: {}, prompt: {} chars", model, args.prompt.len());
     if args.warm > 0 {
         log::info!("(warmup: {} requests not shown)", args.warm);
