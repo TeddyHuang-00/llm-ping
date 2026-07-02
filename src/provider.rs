@@ -26,6 +26,7 @@ pub fn next_sse_event(line: &str) -> SseEvent<'_> {
     if line.is_empty() {
         return SseEvent::Boundary;
     }
+    #[allow(clippy::option_if_let_else)]
     if let Some(data) = line.strip_prefix("data:") {
         SseEvent::Data(data.trim())
     } else if let Some(name) = line.strip_prefix("event:") {
@@ -39,7 +40,7 @@ pub fn next_sse_event(line: &str) -> SseEvent<'_> {
 
 // ── Provider trait ──────────────────────────────────────────────────────────
 
-pub trait Provider {
+pub trait Provider: Sync {
     fn build_body(&self, model: &str, prompt: &str, stream: bool) -> String;
     fn parse_chunk(&self, data: &str) -> ContentEvent;
 }
@@ -72,12 +73,11 @@ impl Provider for Ollama {
 
     fn parse_chunk(&self, data: &str) -> ContentEvent {
         if let Ok(chunk) = serde_json::from_str::<OllamaChunk>(data) {
-            if let Some(msg) = &chunk.message {
-                if let Some(content) = &msg.content {
-                    if !content.is_empty() {
-                        return ContentEvent::Token(content.clone());
-                    }
-                }
+            if let Some(msg) = &chunk.message
+                && let Some(content) = &msg.content
+                && !content.is_empty()
+            {
+                return ContentEvent::Token(content.clone());
             }
             if chunk.done.unwrap_or(false) {
                 return ContentEvent::Done(chunk.eval_count);
@@ -129,19 +129,18 @@ impl Provider for OpenAI {
 
     fn parse_chunk(&self, data: &str) -> ContentEvent {
         if let Ok(chunk) = serde_json::from_str::<OpenAiChunk>(data) {
-            if let Some(usage) = chunk.usage {
-                if let Some(choices) = &chunk.choices {
-                    if choices.is_empty() {
-                        return ContentEvent::Done(usage.completion_tokens);
-                    }
-                }
+            if let Some(usage) = chunk.usage
+                && let Some(choices) = &chunk.choices
+                && choices.is_empty()
+            {
+                return ContentEvent::Done(usage.completion_tokens);
             }
             if let Some(choices) = chunk.choices {
                 for choice in choices {
-                    if let Some(content) = choice.delta.content {
-                        if !content.is_empty() {
-                            return ContentEvent::Token(content);
-                        }
+                    if let Some(content) = choice.delta.content
+                        && !content.is_empty()
+                    {
+                        return ContentEvent::Token(content);
                     }
                 }
             }
@@ -193,12 +192,13 @@ impl Provider for Anthropic {
         if let Ok(evt) = serde_json::from_str::<AnthropicEvent>(data) {
             return match evt {
                 AnthropicEvent::ContentBlockDelta { delta } => {
-                    if let Some(text) = delta.text {
-                        if !text.is_empty() {
-                            return ContentEvent::Token(text);
-                        }
+                    if let Some(text) = delta.text
+                        && !text.is_empty()
+                    {
+                        ContentEvent::Token(text)
+                    } else {
+                        ContentEvent::None
                     }
-                    ContentEvent::None
                 }
                 AnthropicEvent::MessageDelta { usage } => {
                     ContentEvent::Done(usage.and_then(|u| u.output_tokens))

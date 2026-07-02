@@ -1,24 +1,30 @@
-use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::{
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
 use bytes::Bytes;
 use clap::Parser;
-use hickory_resolver::TokioResolver;
-use hickory_resolver::config::ResolverConfig;
-use hickory_resolver::name_server::TokioConnectionProvider;
+use hickory_resolver::{
+    TokioResolver, config::ResolverConfig, name_server::TokioConnectionProvider,
+};
 use http_body_util::BodyExt;
-use hyper::client::conn::http1::handshake;
-use hyper::header::{AUTHORIZATION, CONTENT_TYPE};
-use hyper::{Request, StatusCode};
+use hyper::{
+    Request, StatusCode,
+    client::conn::http1::handshake,
+    header::{AUTHORIZATION, CONTENT_TYPE},
+};
 use hyper_util::rt::TokioIo;
 use serde::Serialize;
-use tabled::settings::Style;
-use tabled::{Table, Tabled};
-use tokio::io::{AsyncRead, AsyncWrite};
-use tokio::net::TcpStream;
-use tokio_rustls::TlsConnector;
-use tokio_rustls::rustls::pki_types::ServerName;
-use tokio_rustls::rustls::{ClientConfig, RootCertStore};
+use tabled::{Table, Tabled, settings::Style};
+use tokio::{
+    io::{AsyncRead, AsyncWrite},
+    net::TcpStream,
+};
+use tokio_rustls::{
+    TlsConnector,
+    rustls::{ClientConfig, RootCertStore, pki_types::ServerName},
+};
 use url::Url;
 
 mod provider;
@@ -153,13 +159,9 @@ async fn dial(
         .map_err(|e| format!("TCP connect failed: {e}"))?;
     let tcp_time = t_tcp_start.elapsed();
     let _ = tcp.set_nodelay(true);
-
     let t_tls_start = Instant::now();
-    let tls_time;
-    let io: TokioIo<Box<dyn IoBox>>;
-    if url.scheme() == "https" {
-        // ponytail: empty root store — HTTPS fails on real servers; add webpki-roots when needed
-        let root_store = RootCertStore::empty();
+    let (tls_time, io) = if url.scheme() == "https" {
+        let root_store = RootCertStore::from_iter(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
         let config = ClientConfig::builder()
             .with_root_certificates(root_store)
             .with_no_client_auth();
@@ -171,12 +173,13 @@ async fn dial(
             .connect(name, tcp)
             .await
             .map_err(|e| format!("TLS handshake failed: {e}"))?;
-        tls_time = Some(t_tls_start.elapsed());
-        io = TokioIo::new(Box::new(tls));
+        (
+            Some(t_tls_start.elapsed()),
+            TokioIo::new(Box::new(tls) as Box<dyn IoBox>),
+        )
     } else {
-        tls_time = None;
-        io = TokioIo::new(Box::new(tcp));
-    }
+        (None, TokioIo::new(Box::new(tcp) as Box<dyn IoBox>))
+    };
 
     Ok((
         ConnTiming {
