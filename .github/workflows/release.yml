@@ -1,0 +1,95 @@
+name: Build Release Binaries
+on:
+  release:
+    types: [published]
+
+jobs:
+  build-release:
+    name: release ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-24.04
+          - target: aarch64-unknown-linux-musl
+            os: ubuntu-24.04-arm
+          - target: x86_64-apple-darwin
+            os: macos-26-intel
+          - target: aarch64-apple-darwin
+            os: macos-latest
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+          - target: aarch64-pc-windows-msvc
+            os: windows-11-arm
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Cross-Compilation Tools
+        if: contains(matrix.target, 'linux-musl')
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y musl-tools pkg-config libssl-dev
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          target: ${{ matrix.target }}
+
+      - name: Run Build
+        run: cargo build --locked --release --target ${{ matrix.target }}
+
+      - name: Setup python for checksums
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.x"
+
+      - name: Create artifact directory
+        shell: bash
+        run: |
+          directory=llm-ping-${{ matrix.target }}
+          mkdir $directory
+          cp README.md LICENSE-* $directory
+          if [ -f target/${{ matrix.target }}/release/llm-ping.exe ]; then
+            cp target/${{ matrix.target }}/release/llm-ping.exe $directory
+            7z a -r $directory.zip $directory
+            python3 -c "import hashlib; open('$directory.zip.sha256', 'w').write(hashlib.file_digest(open('$directory.zip', 'rb'), 'sha256').hexdigest())"
+          else
+            cp target/${{ matrix.target }}/release/llm-ping $directory
+            tar cJf $directory.tar.xz $directory
+            python3 -c "import hashlib; open('$directory.tar.xz.sha256', 'w').write(hashlib.file_digest(open('$directory.tar.xz', 'rb'), 'sha256').hexdigest())"
+          fi
+
+      - name: Upload Release
+        uses: ncipollo/release-action@v1.21.0
+        with:
+          artifacts: "llm-ping-${{ matrix.target }}.*"
+          allowUpdates: true
+          omitNameDuringUpdate: true
+          omitBodyDuringUpdate: true
+
+  update-changelog:
+    name: Update Changelog
+    runs-on: ubuntu-latest
+    needs: build-release
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Update CHANGELOG
+        id: changelog
+        uses: requarks/changelog-action@v1.10.3
+        with:
+          token: ${{ github.token }}
+          tag: ${{ github.event.release.tag_name }}
+          writeToFile: false
+
+      - name: Update Release
+        uses: ncipollo/release-action@v1.21.0
+        with:
+          allowUpdates: true
+          body: ${{ steps.changelog.outputs.changes }}
