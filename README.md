@@ -138,8 +138,6 @@ llm-ping -vvv
 # Override URL and model
 llm-ping --url https://my-proxy.example.com/v1/chat/completions -m claude-4
 
-# Flush DNS cache between requests (test multi-region load balancers)
-llm-ping --provider openai -c 5 --flush-dns
 ```
 
 ## JSON Output
@@ -170,19 +168,19 @@ All durations in milliseconds. `error` is null on success, otherwise a string wi
 Usage: llm-ping [OPTIONS]
 
 Options:
-      --provider <PROVIDER>  Provider type [default: ollama]
+  -p, --provider <PROVIDER>  Provider type [default: ollama]
   -u, --url <URL>            API endpoint URL (default from --provider)
   -m, --model <MODEL>        Model name (default from --provider)
-  -p, --prompt <PROMPT>      Prompt text [default: "Introduce yourself in one short sentence."]
+      --prompt <PROMPT>      Prompt text [default: "Introduce yourself in one short sentence."]
   -c, --count <COUNT>        Number of requests [default: 1]
       --warm <WARM>          Warmup requests (not counted in stats) [default: 0]
   -k, --api-key <API_KEY>    API key (default: provider-specific env var)
+      --params <PARAMS>      Extra JSON parameters merged into request body
       --no-stream            Non-streaming mode
-      --flush-dns            Flush DNS cache between requests
       --json                 JSON output
       --dry-run              Dry run: print request details without sending
-  -v, --verbose...           Verbose output (-v: info, -vv: debug, -vvv: trace)
       --quiet                Suppress progress dots
+  -v, --verbose...           Verbose output (-v: info, -vv: debug, -vvv: trace)
       --timeout <TIMEOUT>    Request timeout in seconds [default: 60]
   -h, --help                 Print help (see more with '--help')
   -V, --version              Print version

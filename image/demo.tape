@@ -25,7 +25,7 @@ Ctrl+L
 Sleep 500ms
 
 # Show actual output
-Type "./llm-ping --provider ollama --model gemma4:12b -p 'Briefly introduce yourself'"
+Type "./llm-ping --provider ollama --model gemma4:12b"
 Enter
 Wait
 Sleep 2s
