@@ -1,4 +1,5 @@
 use std::{
+    io::Write,
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -83,9 +84,13 @@ struct Args {
     #[arg(long)]
     dry_run: bool,
 
-    /// Verbose output (-v: debug, -vv: trace)
+    /// Verbose output (-v: info, -vv: debug, -vvv: trace)
     #[arg(short, long, action = clap::ArgAction::Count)]
     verbose: u8,
+
+    /// Suppress progress dots
+    #[arg(long)]
+    quiet: bool,
 
     #[allow(dead_code)]
     /// Request timeout in seconds
@@ -464,11 +469,13 @@ fn fmt_row(r: &ProbeResult) -> Row {
     }
 }
 
-fn avg_row(results: &[&ProbeResult]) -> Row {
+fn avg_row(results: &[ProbeResult]) -> Row {
     let n = results.len() as f64;
     let avg = |f: fn(&Phases) -> Option<Duration>| -> Option<Duration> {
         let values: Vec<Duration> = results.iter().filter_map(|r| f(&r.phases)).collect();
-        if values.is_empty() { return None; }
+        if values.is_empty() {
+            return None;
+        }
         Some(values.into_iter().sum::<Duration>().div_f64(n))
     };
     let total_tokens: usize = results.iter().map(|r| r.tokens).sum();
@@ -495,8 +502,9 @@ async fn main() {
 
     simple_logger::SimpleLogger::new()
         .with_level(match args.verbose {
-            0 => log::LevelFilter::Info,
-            1 => log::LevelFilter::Debug,
+            0 => log::LevelFilter::Warn,
+            1 => log::LevelFilter::Info,
+            2 => log::LevelFilter::Debug,
             _ => log::LevelFilter::Trace,
         })
         .env()
@@ -548,50 +556,64 @@ async fn main() {
         let _ = probe_once(&args, &dns_resolver, &*provider, &url, model, 0).await;
     }
 
-    let mut results = Vec::new();
-    for n in 1..=args.count {
-        let r = probe_once(&args, &dns_resolver, &*provider, &url, model, n).await;
-        results.push(r);
-
-        if args.flush_dns {
-            // ponytail: not implemented — hickory caches internally
-        }
-    }
-
     if args.json {
+        let mut results = Vec::new();
+        for n in 1..=args.count {
+            results.push(probe_once(&args, &dns_resolver, &*provider, &url, model, n).await);
+        }
         println!("{}", serde_json::to_string_pretty(&results).unwrap());
         return;
     }
 
-    let ok_results: Vec<_> = results.iter().filter(|r| r.error.is_none()).collect::<Vec<_>>();
-    if ok_results.is_empty() {
-        log::error!("All requests failed.");
-        for r in &results {
-            if let Some(ref e) = r.error {
-                log::error!("  #{}: {e}", r.n);
-            }
-        }
-        return;
-    }
-
-    let mut rows: Vec<Row> = results.iter().map(fmt_row).collect();
-    if ok_results.len() > 1 {
-        rows.push(avg_row(&ok_results));
-    }
-    let mut table = Table::new(rows);
-    table.with(Style::modern());
-    log::info!("llm-ping — {} ({})", args.provider, url);
-    log::info!("model: {}, prompt: {} chars", model, args.prompt.len());
+    log::info!("provider: {}", args.provider);
+    log::info!("url: {url}");
+    log::info!("model: {model}");
+    log::info!("prompt: {} chars", args.prompt.len());
     if args.warm > 0 {
-        log::info!("(warmup: {} requests not shown)", args.warm);
+        log::info!("warmup: {} requests", args.warm);
     }
-    println!();
-    println!("{table}");
-    println!();
-
-    for r in &results {
+    let show_dots = args.count > 1 && !args.quiet;
+    let mut all_rows: Vec<Row> = Vec::new();
+    let mut ok_results: Vec<ProbeResult> = Vec::new();
+    for n in 1..=args.count {
+        let r = probe_once(&args, &dns_resolver, &*provider, &url, model, n).await;
         if let Some(ref e) = r.error {
-            log::error!("  #{} error: {e}", r.n);
+            log::error!("req={n} error: {e}");
+            continue;
         }
+        let row = fmt_row(&r);
+        log::debug!(
+            "req={} dns={} tcp={} tls={} http_fb={} ttft={} gen={} tok_s={} total={} tokens={}",
+            row.req,
+            row.dns,
+            row.tcp,
+            row.tls,
+            row.http_fb,
+            row.ttft,
+            row.gen_dur,
+            row.tok_s,
+            row.total,
+            row.tokens
+        );
+        all_rows.push(row);
+        ok_results.push(r);
+        if show_dots {
+            print!(".");
+            std::io::stdout().flush().ok();
+        }
+    }
+    if show_dots {
+        println!();
+    }
+
+    if ok_results.len() > 1 {
+        all_rows.push(avg_row(&ok_results));
+    }
+    let mut table = Table::new(all_rows);
+    table.with(Style::modern());
+    println!("{table}");
+
+    if ok_results.is_empty() {
+        log::error!("all requests failed");
     }
 }

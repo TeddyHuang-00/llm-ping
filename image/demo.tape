@@ -8,8 +8,10 @@ Set Theme "Catppuccin Mocha"
 
 # Setup
 Hide
-Type "cargo build --release && cp target/release/llm-ping . && clear"
+Type "cargo build --release && cp target/release/llm-ping ."
 Enter
+Wait
+Ctrl+L
 Show
 
 # Show help
