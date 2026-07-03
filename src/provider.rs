@@ -152,8 +152,8 @@ pub struct Anthropic;
 impl Provider for Anthropic {
     fn build_body(&self, model: &str, prompt: &str, stream: bool) -> String {
         let mut body = serde_json::json!({"model": model, "max_tokens": 256, "messages": [{"role": "user", "content": prompt}], "stream": stream});
-        if !stream {
-            body.as_object_mut().unwrap().remove("stream");
+        if !stream && let Some(obj) = body.as_object_mut() {
+            obj.remove("stream");
         }
         body.to_string()
     }
@@ -296,11 +296,7 @@ impl ProviderKind {
                 "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
                 "qwen3-coder-plus",
             ),
-            Self::Minimax => (
-                "https://api.minimax.chat/v1/chat/completions",
-                "MiniMax-M2.1",
-            ),
-            Self::MinimaxCn => (
+            Self::Minimax | Self::MinimaxCn => (
                 "https://api.minimax.chat/v1/chat/completions",
                 "MiniMax-M2.1",
             ),
@@ -388,7 +384,7 @@ impl ProviderKind {
             Self::Nvidia => &["NVIDIA_API_KEY"],
             Self::Sambanova => &["SAMBA_API_KEY", "SAMBANOVA_API_KEY"],
             Self::OpenaiCompatible => &["CUSTOM_API_KEY"],
-            _ => &[],
+            Self::Ollama => &[],
         }
     }
 }

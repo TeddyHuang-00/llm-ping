@@ -31,6 +31,21 @@ use provider::{ContentEvent, Provider, ProviderKind, SseEvent, next_sse_event};
 
 // ── CLI ────────────────────────────────────────────────────────────────────
 
+#[derive(clap::Args, Debug, Default)]
+struct OutputFlags {
+    /// JSON output
+    #[arg(long)]
+    json: bool,
+
+    /// Dry run: print request details without sending
+    #[arg(long)]
+    dry_run: bool,
+
+    /// Suppress progress dots
+    #[arg(long)]
+    quiet: bool,
+}
+
 #[derive(Debug, Parser)]
 #[command(name = "llm-ping", version, about = "LLM API latency diagnostic")]
 struct Args {
@@ -74,21 +89,12 @@ struct Args {
     #[arg(long)]
     flush_dns: bool,
 
-    /// JSON output
-    #[arg(long)]
-    json: bool,
-
-    /// Dry run: print request details without sending
-    #[arg(long)]
-    dry_run: bool,
+    #[command(flatten)]
+    output: OutputFlags,
 
     /// Verbose output (-v: info, -vv: debug, -vvv: trace)
     #[arg(short, long, action = clap::ArgAction::Count)]
     verbose: u8,
-
-    /// Suppress progress dots
-    #[arg(long)]
-    quiet: bool,
 
     #[allow(dead_code)]
     /// Request timeout in seconds
@@ -176,7 +182,10 @@ async fn dial(
     let _ = tcp.set_nodelay(true);
     let t_tls_start = Instant::now();
     let (tls_time, io) = if url.scheme() == "https" {
-        let root_store = RootCertStore::from_iter(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+        let root_store = webpki_roots::TLS_SERVER_ROOTS
+            .iter()
+            .cloned()
+            .collect::<RootCertStore>();
         let config = ClientConfig::builder()
             .with_root_certificates(root_store)
             .with_no_client_auth();
@@ -206,118 +215,23 @@ async fn dial(
     ))
 }
 
-// ── Single probe ────────────────────────────────────────────────────────────
+// ── Stream body reader ──────────────────────────────────────────────────────
 
-async fn probe_once(
-    args: &Args,
-    dns_resolver: &TokioResolver,
+async fn read_stream(
+    body: hyper::body::Incoming,
     provider: &dyn Provider,
-    url: &Url,
-    model: &str,
-    n: u32,
-) -> ProbeResult {
-    let t_start = Instant::now();
-
-    let (conn_timing, io) = match dial(url, dns_resolver).await {
-        Ok(v) => v,
-        Err(e) => {
-            return ProbeResult {
-                n,
-                phases: Phases::default(),
-                chars: 0,
-                tokens: 0,
-                error: Some(e),
-            };
-        }
-    };
-
-    let (mut tx, conn) = match handshake(io).await {
-        Ok(v) => v,
-        Err(e) => {
-            return ProbeResult {
-                n,
-                phases: Phases::default(),
-                chars: 0,
-                tokens: 0,
-                error: Some(format!("HTTP handshake failed: {e}")),
-            };
-        }
-    };
-    tokio::spawn(conn);
-
-    let body = provider.build_body(model, &args.prompt, !args.no_stream);
-    let req = Request::post(url.as_str())
-        .header(CONTENT_TYPE, "application/json")
-        .header("Accept", "text/event-stream");
-
-    let req = if let Some(ref key) = args.api_key {
-        req.header(AUTHORIZATION, format!("Bearer {key}"))
-    } else {
-        req
-    };
-
-    let host = url.host_str().unwrap_or("localhost");
-    let port = url.port_or_known_default().unwrap_or(80);
-    let req = req.header("Host", format!("{host}:{port}"));
-
-    let req = req
-        .body(http_body_util::Full::new(Bytes::from(body)))
-        .unwrap();
-
-    let t_req_sent = Instant::now();
-    let resp = match tx.send_request(req).await {
-        Ok(r) => r,
-        Err(e) => {
-            return ProbeResult {
-                n,
-                phases: Phases::default(),
-                chars: 0,
-                tokens: 0,
-                error: Some(format!("request failed: {e}")),
-            };
-        }
-    };
-
-    let t_resp_headers = Instant::now();
-    let http_first_byte = t_resp_headers.duration_since(t_req_sent);
-
-    if resp.status() != StatusCode::OK {
-        let (_parts, body) = resp.into_parts();
-        let body_bytes = body
-            .collect()
-            .await
-            .map(|b| b.to_bytes())
-            .unwrap_or_default();
-        let err_body = String::from_utf8_lossy(&body_bytes).to_string();
-        return ProbeResult {
-            n,
-            phases: Phases::default(),
-            chars: 0,
-            tokens: 0,
-            error: Some(format!("HTTP {}: {err_body}", _parts.status)),
-        };
-    }
-
-    // Read streaming body, parse via provider
-    let mut body = resp.into_body();
+) -> (usize, usize, Option<Instant>) {
     let mut buf = Vec::new();
     let mut first_token = true;
     let mut chars: usize = 0;
     let mut tokens: usize = 0;
     let mut t_first_token: Option<Instant> = None;
 
+    let mut body = body;
     loop {
         let chunk = match body.frame().await {
             Some(Ok(frame)) => frame,
-            Some(Err(e)) => {
-                return ProbeResult {
-                    n,
-                    phases: Phases::default(),
-                    chars: 0,
-                    tokens: 0,
-                    error: Some(format!("stream error: {e}")),
-                };
-            }
+            Some(Err(_)) => return (0, 0, None),
             None => break,
         };
 
@@ -378,6 +292,103 @@ async fn probe_once(
         }
     }
 
+    (chars, tokens, t_first_token)
+}
+
+// ── Single probe ────────────────────────────────────────────────────────────
+
+#[allow(clippy::too_many_lines)]
+async fn probe_once(
+    args: &Args,
+    dns_resolver: &TokioResolver,
+    provider: &dyn Provider,
+    url: &Url,
+    model: &str,
+    n: u32,
+) -> ProbeResult {
+    let t_start = Instant::now();
+
+    let (conn_timing, io) = match dial(url, dns_resolver).await {
+        Ok(v) => v,
+        Err(e) => {
+            return ProbeResult {
+                n,
+                phases: Phases::default(),
+                chars: 0,
+                tokens: 0,
+                error: Some(e),
+            };
+        }
+    };
+
+    let (mut tx, conn) = match handshake(io).await {
+        Ok(v) => v,
+        Err(e) => {
+            return ProbeResult {
+                n,
+                phases: Phases::default(),
+                chars: 0,
+                tokens: 0,
+                error: Some(format!("HTTP handshake failed: {e}")),
+            };
+        }
+    };
+    tokio::spawn(conn);
+
+    let body = provider.build_body(model, &args.prompt, !args.no_stream);
+    let req = Request::post(url.as_str())
+        .header(CONTENT_TYPE, "application/json")
+        .header("Accept", "text/event-stream");
+
+    let req = if let Some(ref key) = args.api_key {
+        req.header(AUTHORIZATION, format!("Bearer {key}"))
+    } else {
+        req
+    };
+
+    let host = url.host_str().unwrap_or("localhost");
+    let port = url.port_or_known_default().unwrap_or(80);
+    let req = req.header("Host", format!("{host}:{port}"));
+
+    let req = req
+        .body(http_body_util::Full::new(Bytes::from(body)))
+        .unwrap_or_else(|_| unreachable!("POST requests accept body"));
+
+    let t_req_sent = Instant::now();
+    let resp = match tx.send_request(req).await {
+        Ok(r) => r,
+        Err(e) => {
+            return ProbeResult {
+                n,
+                phases: Phases::default(),
+                chars: 0,
+                tokens: 0,
+                error: Some(format!("request failed: {e}")),
+            };
+        }
+    };
+
+    let t_resp_headers = Instant::now();
+    let http_first_byte = t_resp_headers.duration_since(t_req_sent);
+
+    if resp.status() != StatusCode::OK {
+        let (parts, body) = resp.into_parts();
+        let body_bytes = body
+            .collect()
+            .await
+            .map(http_body_util::Collected::to_bytes)
+            .unwrap_or_default();
+        let err_body = String::from_utf8_lossy(&body_bytes).to_string();
+        return ProbeResult {
+            n,
+            phases: Phases::default(),
+            chars: 0,
+            tokens: 0,
+            error: Some(format!("HTTP {}: {err_body}", parts.status)),
+        };
+    }
+
+    let (chars, tokens, t_first_token) = read_stream(resp.into_body(), provider).await;
     let t_end = Instant::now();
 
     let t_first = t_first_token.unwrap_or(t_end);
@@ -444,6 +455,9 @@ fn fmt_dur(d: Option<Duration>) -> String {
     }
 }
 
+// ponytail: usize→f64 cast is safe for token counts (< 2^53), use checked path
+// if throughput grows
+#[allow(clippy::cast_precision_loss)]
 fn fmt_tput(tokens: usize, dur: Option<Duration>) -> String {
     match dur {
         Some(d) if d.as_secs_f64() > 0.0 => format!("{:.1}", tokens as f64 / d.as_secs_f64()),
@@ -467,6 +481,13 @@ fn fmt_row(r: &ProbeResult) -> Row {
     }
 }
 
+// ponytail: usize→f64 cast is safe for counts, checked path if values approach
+// 2^53
+#[allow(
+    clippy::cast_precision_loss,
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss
+)]
 fn avg_row(results: &[ProbeResult]) -> Row {
     let n = results.len() as f64;
     let avg = |f: fn(&Phases) -> Option<Duration>| -> Option<Duration> {
@@ -494,6 +515,7 @@ fn avg_row(results: &[ProbeResult]) -> Row {
 
 // ── Main ────────────────────────────────────────────────────────────────────
 
+#[allow(clippy::too_many_lines)]
 #[tokio::main]
 async fn main() {
     let args = Args::parse();
@@ -514,23 +536,23 @@ async fn main() {
             args.provider
                 .api_key_envs()
                 .iter()
-                .filter_map(|name| std::env::var(name).ok())
-                .next()
+                .find_map(|name| std::env::var(name).ok())
         }),
         ..args
     };
 
     let provider: Box<dyn Provider> = (&args.provider).into();
     let (default_url, default_model) = args.provider.defaults();
-    let url: Url = args
-        .url
-        .as_deref()
-        .unwrap_or(default_url)
-        .parse()
-        .expect("invalid URL");
+    let url: Url = match args.url.as_deref().unwrap_or(default_url).parse() {
+        Ok(u) => u,
+        Err(e) => {
+            log::error!("invalid URL: {e}");
+            std::process::exit(1);
+        }
+    };
     let model: &str = args.model.as_deref().unwrap_or(default_model);
 
-    if args.dry_run {
+    if args.output.dry_run {
         let body = provider.build_body(model, &args.prompt, !args.no_stream);
         let masked_key = args.api_key.as_ref().map(|k| {
             let n = k.len().saturating_sub(8);
@@ -544,23 +566,34 @@ async fn main() {
         return;
     }
 
-    let dns_resolver: TokioResolver = TokioResolver::builder_with_config(
+    let dns_resolver: TokioResolver = match TokioResolver::builder_with_config(
         ResolverConfig::default(),
         TokioRuntimeProvider::default(),
     )
     .build()
-    .unwrap();
+    {
+        Ok(r) => r,
+        Err(e) => {
+            log::error!("failed to build DNS resolver: {e}");
+            std::process::exit(1);
+        }
+    };
 
     for _ in 0..args.warm {
         let _ = probe_once(&args, &dns_resolver, &*provider, &url, model, 0).await;
     }
 
-    if args.json {
+    if args.output.json {
         let mut results = Vec::new();
         for n in 1..=args.count {
             results.push(probe_once(&args, &dns_resolver, &*provider, &url, model, n).await);
         }
-        println!("{}", serde_json::to_string_pretty(&results).unwrap());
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&results).unwrap_or_else(|_| unreachable!(
+                "JSON serialization of ProbeResult is infallible"
+            ))
+        );
         return;
     }
 
@@ -571,7 +604,7 @@ async fn main() {
     if args.warm > 0 {
         log::info!("warmup: {} requests", args.warm);
     }
-    let show_dots = args.count > 1 && !args.quiet;
+    let show_dots = args.count > 1 && !args.output.quiet;
     let mut all_rows: Vec<Row> = Vec::new();
     let mut ok_results: Vec<ProbeResult> = Vec::new();
     for n in 1..=args.count {
