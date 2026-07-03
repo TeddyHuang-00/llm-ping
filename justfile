@@ -1,6 +1,8 @@
 # Format code
 format:
     cargo +nightly fmt --all
+    cargo sort
+    cargo sort-derives
 
 # Check for errors and auto-fix
 check: format

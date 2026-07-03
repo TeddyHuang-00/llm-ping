@@ -33,7 +33,7 @@ use provider::{ContentEvent, Provider, ProviderKind, SseEvent, next_sse_event};
 
 // ── CLI ────────────────────────────────────────────────────────────────────
 
-#[derive(Parser, Debug)]
+#[derive(Debug, Parser)]
 #[command(name = "llm-ping", version, about = "LLM API latency diagnostic")]
 struct Args {
     /// Provider type

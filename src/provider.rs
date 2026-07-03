@@ -181,7 +181,7 @@ impl Provider for Anthropic {
 
 // ── ProviderKind enum ───────────────────────────────────────────────────────
 
-#[derive(clap::ValueEnum, Clone, Debug)]
+#[derive(Clone, Debug, clap::ValueEnum)]
 pub enum ProviderKind {
     Ollama,
     OpenAI,
