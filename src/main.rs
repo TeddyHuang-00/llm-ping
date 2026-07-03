@@ -50,7 +50,7 @@ struct OutputFlags {
 #[command(name = "llm-ping", version, about = "LLM API latency diagnostic")]
 struct Args {
     /// Provider type
-    #[arg(long, default_value = "ollama")]
+    #[arg(short = 'p', long, default_value = "ollama")]
     provider: ProviderKind,
 
     /// API endpoint URL (default from --provider)
@@ -63,7 +63,6 @@ struct Args {
 
     /// Prompt text
     #[arg(
-        short,
         long,
         default_value = "Introduce yourself in one short sentence."
     )]
