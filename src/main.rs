@@ -248,6 +248,7 @@ async fn read_stream(
                         if let SseEvent::Data(data) = next_sse_event(&line) {
                             match provider.parse_chunk(data) {
                                 ContentEvent::Token(content) => {
+                                    log::trace!("token: {content}");
                                     if first_token {
                                         t_first_token = Some(Instant::now());
                                         first_token = false;
@@ -256,6 +257,7 @@ async fn read_stream(
                                     tokens += content.len() / 4 + 1;
                                 }
                                 ContentEvent::Done(server_tokens) => {
+                                    log::trace!("done, tokens={server_tokens:?}");
                                     if let Some(tok) = server_tokens {
                                         tokens = tok;
                                     }
@@ -350,10 +352,12 @@ async fn probe_once(
     let port = url.port_or_known_default().unwrap_or(80);
     let req = req.header("Host", format!("{host}:{port}"));
 
+    let body_len = body.len();
     let req = req
         .body(http_body_util::Full::new(Bytes::from(body)))
         .unwrap_or_else(|_| unreachable!("POST requests accept body"));
 
+    log::trace!("-> #{n} POST {url}: {body_len} bytes");
     let t_req_sent = Instant::now();
     let resp = match tx.send_request(req).await {
         Ok(r) => r,
@@ -370,6 +374,7 @@ async fn probe_once(
 
     let t_resp_headers = Instant::now();
     let http_first_byte = t_resp_headers.duration_since(t_req_sent);
+    log::trace!("<- #{n} HTTP {} ({:.1}ms)", resp.status(), http_first_byte.as_secs_f64() * 1000.0);
 
     if resp.status() != StatusCode::OK {
         let (parts, body) = resp.into_parts();
@@ -604,7 +609,7 @@ async fn main() {
     if args.warm > 0 {
         log::info!("warmup: {} requests", args.warm);
     }
-    let show_dots = args.count > 1 && !args.output.quiet;
+    let show_dots = args.count > 1 && !args.output.quiet && args.verbose < 1;
     let mut all_rows: Vec<Row> = Vec::new();
     let mut ok_results: Vec<ProbeResult> = Vec::new();
     for n in 1..=args.count {
