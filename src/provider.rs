@@ -416,3 +416,142 @@ impl ProviderKind {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_next_sse_event_data() {
+        assert!(matches!(
+            next_sse_event("data: hello"),
+            SseEvent::Data("hello")
+        ));
+        assert!(matches!(next_sse_event("data:  "), SseEvent::Data("")));
+        assert!(matches!(next_sse_event("data:"), SseEvent::Data("")));
+        assert!(matches!(
+            next_sse_event("not-prefixed"),
+            SseEvent::Data("not-prefixed")
+        ));
+    }
+
+    #[test]
+    fn test_next_sse_event_boundary() {
+        assert!(matches!(next_sse_event(""), SseEvent::Boundary));
+        assert!(matches!(next_sse_event("\r"), SseEvent::Boundary));
+    }
+
+    #[test]
+    fn test_next_sse_event_meta() {
+        assert!(matches!(
+            next_sse_event("event: done"),
+            SseEvent::EventName("done")
+        ));
+        assert!(matches!(next_sse_event(": comment"), SseEvent::Comment));
+        assert!(matches!(next_sse_event(": "), SseEvent::Comment));
+    }
+
+    #[test]
+    fn test_ollama_parse_content() {
+        let p = Ollama;
+        assert!(
+            matches!(p.parse_chunk(r#"{"message":{"content":"Hi"},"done":false}"#),
+            ContentEvent::Token(s, false) if s == "Hi")
+        );
+    }
+
+    #[test]
+    fn test_ollama_parse_thinking() {
+        let p = Ollama;
+        assert!(
+            matches!(p.parse_chunk(r#"{"message":{"reasoning":"think..."},"done":false}"#),
+            ContentEvent::Token(s, true) if s == "think...")
+        );
+        assert!(
+            matches!(p.parse_chunk(r#"{"message":{"thinking":"think2"},"done":false}"#),
+            ContentEvent::Token(s, true) if s == "think2")
+        );
+    }
+
+    #[test]
+    fn test_ollama_parse_done() {
+        let p = Ollama;
+        assert!(matches!(
+            p.parse_chunk(r#"{"done":true,"eval_count":42}"#),
+            ContentEvent::Done(Some(42))
+        ));
+        assert!(matches!(
+            p.parse_chunk(r#"{"done":true}"#),
+            ContentEvent::Done(None)
+        ));
+    }
+
+    #[test]
+    fn test_ollama_parse_invalid() {
+        let p = Ollama;
+        assert!(matches!(p.parse_chunk("not json"), ContentEvent::None));
+    }
+
+    #[test]
+    fn test_openai_parse_content() {
+        let p = OpenAI;
+        assert!(
+            matches!(p.parse_chunk(r#"{"choices":[{"delta":{"content":"Hi"}}]}"#),
+            ContentEvent::Token(s, false) if s == "Hi")
+        );
+    }
+
+    #[test]
+    fn test_openai_parse_reasoning() {
+        let p = OpenAI;
+        assert!(
+            matches!(p.parse_chunk(r#"{"choices":[{"delta":{"reasoning_content":"think..."}}]}"#),
+            ContentEvent::Token(s, true) if s == "think...")
+        );
+    }
+
+    #[test]
+    fn test_openai_parse_usage_done() {
+        let p = OpenAI;
+        assert!(matches!(
+            p.parse_chunk(r#"{"choices":[],"usage":{"completion_tokens":42}}"#),
+            ContentEvent::Done(Some(42))
+        ));
+    }
+
+    #[test]
+    fn test_anthropic_parse_content() {
+        let p = Anthropic;
+        assert!(
+            matches!(p.parse_chunk(r#"{"type":"content_block_delta","delta":{"text":"Hi"}}"#),
+            ContentEvent::Token(s, false) if s == "Hi")
+        );
+    }
+
+    #[test]
+    fn test_anthropic_parse_thinking() {
+        let p = Anthropic;
+        assert!(
+            matches!(p.parse_chunk(r#"{"type":"content_block_delta","delta":{"thinking":"think..."}}"#),
+            ContentEvent::Token(s, true) if s == "think...")
+        );
+    }
+
+    #[test]
+    fn test_anthropic_parse_done() {
+        let p = Anthropic;
+        assert!(matches!(
+            p.parse_chunk(r#"{"type":"message_delta","usage":{"output_tokens":42}}"#),
+            ContentEvent::Done(Some(42))
+        ));
+    }
+
+    #[test]
+    fn test_anthropic_parse_other() {
+        let p = Anthropic;
+        assert!(matches!(
+            p.parse_chunk(r#"{"type":"message_start"}"#),
+            ContentEvent::None
+        ));
+    }
+}

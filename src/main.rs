@@ -688,3 +688,44 @@ async fn main() {
         log::error!("all requests failed");
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_merge_params_shallow_override() {
+        let base = r#"{"model":"gpt-4o","stream":true}"#;
+        let extra = r#"{"model":"gpt-4.1"}"#;
+        let merged = merge_params(base, extra);
+        assert!(merged.contains(r#""model":"gpt-4.1""#));
+        assert!(merged.contains(r#""stream":true"#));
+    }
+
+    #[test]
+    fn test_merge_params_preserves_base_fields() {
+        let base = r#"{"a":1,"b":2}"#;
+        let extra = r#"{"c":3}"#;
+        let merged = merge_params(base, extra);
+        assert!(merged.contains(r#""a":1"#));
+        assert!(merged.contains(r#""b":2"#));
+        assert!(merged.contains(r#""c":3"#));
+    }
+
+    #[test]
+    fn test_merge_params_no_extra() {
+        let base = r#"{"model":"gpt-4o"}"#;
+        assert_eq!(merge_params(base, ""), base);
+        assert_eq!(merge_params(base, "not json"), base);
+    }
+
+    #[test]
+    fn test_merge_params_shallow_only() {
+        // ponytail: no nested merge — extra's nested objects replace wholesale
+        let base = r#"{"a":{"x":1}}"#;
+        let extra = r#"{"a":{"y":2}}"#;
+        let merged = merge_params(base, extra);
+        assert!(merged.contains(r#""y":2"#));
+        assert!(!merged.contains(r#""x":1"#));
+    }
+}
