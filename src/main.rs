@@ -62,10 +62,7 @@ struct Args {
     model: Option<String>,
 
     /// Prompt text
-    #[arg(
-        long,
-        default_value = "Introduce yourself in one short sentence."
-    )]
+    #[arg(long, default_value = "Introduce yourself in one short sentence.")]
     prompt: String,
 
     /// Number of requests
@@ -87,10 +84,6 @@ struct Args {
     /// Non-streaming mode
     #[arg(long)]
     no_stream: bool,
-
-    /// Flush DNS cache between requests
-    #[arg(long)]
-    flush_dns: bool,
 
     #[command(flatten)]
     output: OutputFlags,
@@ -287,7 +280,14 @@ async fn read_stream(
         if let SseEvent::Data(data) = next_sse_event(&line) {
             match provider.parse_chunk(data) {
                 ContentEvent::Token(content, is_thinking) => {
-                    log::trace!("{}: {}", if is_thinking { "thinking" } else { "content" }, content.replace('\n', "\\n").replace('\r', "\\r").replace('\t', "\\t"));
+                    log::trace!(
+                        "{}: {}",
+                        if is_thinking { "thinking" } else { "content" },
+                        content
+                            .replace('\n', "\\n")
+                            .replace('\r', "\\r")
+                            .replace('\t', "\\t")
+                    );
                     if first_token {
                         t_first_token = Some(Instant::now());
                     }
