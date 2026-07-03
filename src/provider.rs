@@ -6,7 +6,7 @@ use serde::Deserialize;
 
 #[derive(Debug)]
 pub enum ContentEvent {
-    Token(String),
+    Token(String, bool),
     Done(Option<usize>),
     None,
 }
@@ -52,6 +52,10 @@ pub trait Provider: Sync {
 #[derive(Deserialize)]
 struct OllamaMessage {
     content: Option<String>,
+    #[serde(default)]
+    reasoning: Option<String>,
+    #[serde(default)]
+    thinking: Option<String>,
 }
 #[derive(Deserialize)]
 struct OllamaChunk {
@@ -67,11 +71,22 @@ impl Provider for Ollama {
     }
     fn parse_chunk(&self, data: &str) -> ContentEvent {
         if let Ok(chunk) = serde_json::from_str::<OllamaChunk>(data) {
-            if let Some(msg) = &chunk.message
-                && let Some(content) = &msg.content
-                && !content.is_empty()
-            {
-                return ContentEvent::Token(content.clone());
+            if let Some(msg) = &chunk.message {
+                if let Some(content) = &msg.content
+                    && !content.is_empty()
+                {
+                    return ContentEvent::Token(content.clone(), false);
+                }
+                if let Some(text) = &msg.reasoning
+                    && !text.is_empty()
+                {
+                    return ContentEvent::Token(text.clone(), true);
+                }
+                if let Some(text) = &msg.thinking
+                    && !text.is_empty()
+                {
+                    return ContentEvent::Token(text.clone(), true);
+                }
             }
             if chunk.done.unwrap_or(false) {
                 return ContentEvent::Done(chunk.eval_count);
@@ -84,6 +99,8 @@ impl Provider for Ollama {
 #[derive(Deserialize)]
 struct OpenAiDelta {
     content: Option<String>,
+    #[serde(default)]
+    reasoning_content: Option<String>,
 }
 #[derive(Deserialize)]
 struct OpenAiChoice {
@@ -120,7 +137,12 @@ impl Provider for OpenAI {
                     if let Some(content) = choice.delta.content
                         && !content.is_empty()
                     {
-                        return ContentEvent::Token(content);
+                        return ContentEvent::Token(content, false);
+                    }
+                    if let Some(content) = choice.delta.reasoning_content
+                        && !content.is_empty()
+                    {
+                        return ContentEvent::Token(content, true);
                     }
                 }
             }
@@ -132,6 +154,8 @@ impl Provider for OpenAI {
 #[derive(Deserialize)]
 struct AnthropicTextDelta {
     text: Option<String>,
+    #[serde(default)]
+    thinking: Option<String>,
 }
 #[derive(Deserialize)]
 #[serde(tag = "type")]
@@ -164,7 +188,11 @@ impl Provider for Anthropic {
                     if let Some(text) = delta.text
                         && !text.is_empty()
                     {
-                        ContentEvent::Token(text)
+                        ContentEvent::Token(text, false)
+                    } else if let Some(thinking) = delta.thinking
+                        && !thinking.is_empty()
+                    {
+                        ContentEvent::Token(thinking, true)
                     } else {
                         ContentEvent::None
                     }

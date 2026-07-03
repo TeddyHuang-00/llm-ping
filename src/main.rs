@@ -31,6 +31,8 @@ use provider::{ContentEvent, Provider, ProviderKind, SseEvent, next_sse_event};
 
 // ── CLI ────────────────────────────────────────────────────────────────────
 
+// ponytail: clap requires bool fields for flags
+#[allow(clippy::struct_excessive_bools)]
 #[derive(clap::Args, Debug, Default)]
 struct OutputFlags {
     /// JSON output
@@ -44,6 +46,10 @@ struct OutputFlags {
     /// Suppress progress dots
     #[arg(long)]
     quiet: bool,
+
+    /// Model uses thinking/reasoning tokens (TTFT skips thinking tokens)
+    #[arg(long)]
+    thinking: bool,
 }
 
 #[derive(Debug, Parser)]
@@ -247,14 +253,19 @@ async fn read_stream(
 
                         if let SseEvent::Data(data) = next_sse_event(&line) {
                             match provider.parse_chunk(data) {
-                                ContentEvent::Token(content) => {
-                                    log::trace!("token: {content}");
+                                ContentEvent::Token(content, _is_thinking) => {
+                                    log::trace!(
+                                        "token: {}",
+                                        content
+                                            .replace('\n', "\\n")
+                                            .replace('\r', "\\r")
+                                            .replace('\t', "\\t")
+                                    );
                                     if first_token {
                                         t_first_token = Some(Instant::now());
                                         first_token = false;
                                     }
                                     chars += content.len();
-                                    tokens += content.len() / 4 + 1;
                                 }
                                 ContentEvent::Done(server_tokens) => {
                                     log::trace!("done, tokens={server_tokens:?}");
@@ -277,12 +288,11 @@ async fn read_stream(
         let line = String::from_utf8_lossy(&buf);
         if let SseEvent::Data(data) = next_sse_event(&line) {
             match provider.parse_chunk(data) {
-                ContentEvent::Token(content) => {
+                ContentEvent::Token(content, _is_thinking) => {
                     if first_token {
                         t_first_token = Some(Instant::now());
                     }
                     chars += content.len();
-                    tokens += content.len() / 4 + 1;
                 }
                 ContentEvent::Done(server_tokens) => {
                     if let Some(tok) = server_tokens {
@@ -374,7 +384,11 @@ async fn probe_once(
 
     let t_resp_headers = Instant::now();
     let http_first_byte = t_resp_headers.duration_since(t_req_sent);
-    log::trace!("<- #{n} HTTP {} ({:.1}ms)", resp.status(), http_first_byte.as_secs_f64() * 1000.0);
+    log::trace!(
+        "<- #{n} HTTP {} ({:.1}ms)",
+        resp.status(),
+        http_first_byte.as_secs_f64() * 1000.0
+    );
 
     if resp.status() != StatusCode::OK {
         let (parts, body) = resp.into_parts();
