@@ -467,8 +467,9 @@ fn fmt_row(r: &ProbeResult) -> Row {
 fn avg_row(results: &[&ProbeResult]) -> Row {
     let n = results.len() as f64;
     let avg = |f: fn(&Phases) -> Option<Duration>| -> Option<Duration> {
-        let sum: Duration = results.iter().filter_map(|r| f(&r.phases)).sum();
-        if sum.is_zero() { None } else { Some(sum.div_f64(n)) }
+        let values: Vec<Duration> = results.iter().filter_map(|r| f(&r.phases)).collect();
+        if values.is_empty() { return None; }
+        Some(values.into_iter().sum::<Duration>().div_f64(n))
     };
     let total_tokens: usize = results.iter().map(|r| r.tokens).sum();
     let total_gen: Duration = results.iter().filter_map(|r| r.phases.generation).sum();
