@@ -31,8 +31,6 @@ use provider::{ContentEvent, Provider, ProviderKind, SseEvent, next_sse_event};
 
 // ── CLI ────────────────────────────────────────────────────────────────────
 
-// ponytail: clap requires bool fields for flags
-#[allow(clippy::struct_excessive_bools)]
 #[derive(clap::Args, Debug, Default)]
 struct OutputFlags {
     /// JSON output
@@ -46,10 +44,6 @@ struct OutputFlags {
     /// Suppress progress dots
     #[arg(long)]
     quiet: bool,
-
-    /// Model uses thinking/reasoning tokens (TTFT skips thinking tokens)
-    #[arg(long)]
-    thinking: bool,
 }
 
 #[derive(Debug, Parser)]
@@ -86,6 +80,10 @@ struct Args {
     /// API key (default: provider-specific env var)
     #[arg(short = 'k', long)]
     api_key: Option<String>,
+
+    /// Extra JSON parameters merged into request body
+    #[arg(long)]
+    params: Option<String>,
 
     /// Non-streaming mode
     #[arg(long)]
@@ -307,6 +305,20 @@ async fn read_stream(
     (chars, tokens, t_first_token)
 }
 
+// ponytail: shallow merge, no nested key override
+fn merge_params(body: &str, extra: &str) -> String {
+    let mut v: serde_json::Value = serde_json::from_str(body).unwrap_or_default();
+    if let Some(obj) = v.as_object_mut()
+        && let Ok(extra_v) = serde_json::from_str::<serde_json::Value>(extra)
+        && let Some(extra_obj) = extra_v.as_object()
+    {
+        for (k, val) in extra_obj {
+            obj.insert(k.clone(), val.clone());
+        }
+    }
+    v.to_string()
+}
+
 // ── Single probe ────────────────────────────────────────────────────────────
 
 #[allow(clippy::too_many_lines)]
@@ -347,7 +359,6 @@ async fn probe_once(
     };
     tokio::spawn(conn);
 
-    let body = provider.build_body(model, &args.prompt, !args.no_stream);
     let req = Request::post(url.as_str())
         .header(CONTENT_TYPE, "application/json")
         .header("Accept", "text/event-stream");
@@ -361,7 +372,12 @@ async fn probe_once(
     let host = url.host_str().unwrap_or("localhost");
     let port = url.port_or_known_default().unwrap_or(80);
     let req = req.header("Host", format!("{host}:{port}"));
-
+    let body = provider.build_body(model, &args.prompt, !args.no_stream);
+    let body = if let Some(ref extra) = args.params {
+        merge_params(&body, extra)
+    } else {
+        body
+    };
     let body_len = body.len();
     let req = req
         .body(http_body_util::Full::new(Bytes::from(body)))
