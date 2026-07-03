@@ -331,130 +331,142 @@ async fn probe_once(
     model: &str,
     n: u32,
 ) -> ProbeResult {
-    let t_start = Instant::now();
+    let probe = async {
+        let t_start = Instant::now();
 
-    let (conn_timing, io) = match dial(url, dns_resolver).await {
-        Ok(v) => v,
-        Err(e) => {
+        let (conn_timing, io) = match dial(url, dns_resolver).await {
+            Ok(v) => v,
+            Err(e) => {
+                return ProbeResult {
+                    n,
+                    phases: Phases::default(),
+                    chars: 0,
+                    tokens: 0,
+                    error: Some(e),
+                };
+            }
+        };
+
+        let (mut tx, conn) = match handshake(io).await {
+            Ok(v) => v,
+            Err(e) => {
+                return ProbeResult {
+                    n,
+                    phases: Phases::default(),
+                    chars: 0,
+                    tokens: 0,
+                    error: Some(format!("HTTP handshake failed: {e}")),
+                };
+            }
+        };
+        tokio::spawn(conn);
+
+        let req = Request::post(url.as_str())
+            .header(CONTENT_TYPE, "application/json")
+            .header("Accept", "text/event-stream");
+
+        let req = if let Some(ref key) = args.api_key {
+            req.header(AUTHORIZATION, format!("Bearer {key}"))
+        } else {
+            req
+        };
+
+        let host = url.host_str().unwrap_or("localhost");
+        let port = url.port_or_known_default().unwrap_or(80);
+        let req = req.header("Host", format!("{host}:{port}"));
+        let body = provider.build_body(model, &args.prompt, !args.no_stream);
+        let body = if let Some(ref extra) = args.params {
+            merge_params(&body, extra)
+        } else {
+            body
+        };
+        let body_len = body.len();
+        let req = req
+            .body(http_body_util::Full::new(Bytes::from(body)))
+            .unwrap_or_else(|_| unreachable!("POST requests accept body"));
+
+        log::trace!("-> #{n} POST {url}: {body_len} bytes");
+        let t_req_sent = Instant::now();
+        let resp = match tx.send_request(req).await {
+            Ok(r) => r,
+            Err(e) => {
+                return ProbeResult {
+                    n,
+                    phases: Phases::default(),
+                    chars: 0,
+                    tokens: 0,
+                    error: Some(format!("request failed: {e}")),
+                };
+            }
+        };
+
+        let t_resp_headers = Instant::now();
+        let http_first_byte = t_resp_headers.duration_since(t_req_sent);
+        log::trace!(
+            "<- #{n} HTTP {} ({:.1}ms)",
+            resp.status(),
+            http_first_byte.as_secs_f64() * 1000.0
+        );
+
+        if resp.status() != StatusCode::OK {
+            let (parts, body) = resp.into_parts();
+            let body_bytes = body
+                .collect()
+                .await
+                .map(http_body_util::Collected::to_bytes)
+                .unwrap_or_default();
+            let err_body = String::from_utf8_lossy(&body_bytes).to_string();
             return ProbeResult {
                 n,
                 phases: Phases::default(),
                 chars: 0,
                 tokens: 0,
-                error: Some(e),
+                error: Some(format!("HTTP {}: {err_body}", parts.status)),
             };
+        }
+
+        let (chars, tokens, t_first_token) = read_stream(resp.into_body(), provider).await;
+        let t_end = Instant::now();
+
+        let t_first = t_first_token.unwrap_or(t_end);
+        let generation = if t_first > t_req_sent {
+            Some(t_end.duration_since(t_first))
+        } else {
+            None
+        };
+
+        let phases = Phases {
+            dns: Some(conn_timing.dns),
+            tcp: Some(conn_timing.tcp),
+            tls: Some(conn_timing.tls),
+            http_first_byte: Some(http_first_byte),
+            ttft: if t_first > t_req_sent {
+                Some(t_first.duration_since(t_req_sent))
+            } else {
+                None
+            },
+            generation,
+            total: t_end.duration_since(t_start),
+        };
+
+        ProbeResult {
+            n,
+            phases,
+            chars,
+            tokens,
+            error: None,
         }
     };
 
-    let (mut tx, conn) = match handshake(io).await {
-        Ok(v) => v,
-        Err(e) => {
-            return ProbeResult {
-                n,
-                phases: Phases::default(),
-                chars: 0,
-                tokens: 0,
-                error: Some(format!("HTTP handshake failed: {e}")),
-            };
-        }
-    };
-    tokio::spawn(conn);
-
-    let req = Request::post(url.as_str())
-        .header(CONTENT_TYPE, "application/json")
-        .header("Accept", "text/event-stream");
-
-    let req = if let Some(ref key) = args.api_key {
-        req.header(AUTHORIZATION, format!("Bearer {key}"))
-    } else {
-        req
-    };
-
-    let host = url.host_str().unwrap_or("localhost");
-    let port = url.port_or_known_default().unwrap_or(80);
-    let req = req.header("Host", format!("{host}:{port}"));
-    let body = provider.build_body(model, &args.prompt, !args.no_stream);
-    let body = if let Some(ref extra) = args.params {
-        merge_params(&body, extra)
-    } else {
-        body
-    };
-    let body_len = body.len();
-    let req = req
-        .body(http_body_util::Full::new(Bytes::from(body)))
-        .unwrap_or_else(|_| unreachable!("POST requests accept body"));
-
-    log::trace!("-> #{n} POST {url}: {body_len} bytes");
-    let t_req_sent = Instant::now();
-    let resp = match tx.send_request(req).await {
-        Ok(r) => r,
-        Err(e) => {
-            return ProbeResult {
-                n,
-                phases: Phases::default(),
-                chars: 0,
-                tokens: 0,
-                error: Some(format!("request failed: {e}")),
-            };
-        }
-    };
-
-    let t_resp_headers = Instant::now();
-    let http_first_byte = t_resp_headers.duration_since(t_req_sent);
-    log::trace!(
-        "<- #{n} HTTP {} ({:.1}ms)",
-        resp.status(),
-        http_first_byte.as_secs_f64() * 1000.0
-    );
-
-    if resp.status() != StatusCode::OK {
-        let (parts, body) = resp.into_parts();
-        let body_bytes = body
-            .collect()
-            .await
-            .map(http_body_util::Collected::to_bytes)
-            .unwrap_or_default();
-        let err_body = String::from_utf8_lossy(&body_bytes).to_string();
-        return ProbeResult {
+    tokio::time::timeout(Duration::from_secs(args.timeout), probe)
+        .await
+        .unwrap_or_else(|_| ProbeResult {
             n,
             phases: Phases::default(),
             chars: 0,
             tokens: 0,
-            error: Some(format!("HTTP {}: {err_body}", parts.status)),
-        };
-    }
-
-    let (chars, tokens, t_first_token) = read_stream(resp.into_body(), provider).await;
-    let t_end = Instant::now();
-
-    let t_first = t_first_token.unwrap_or(t_end);
-    let generation = if t_first > t_req_sent {
-        Some(t_end.duration_since(t_first))
-    } else {
-        None
-    };
-
-    let phases = Phases {
-        dns: Some(conn_timing.dns),
-        tcp: Some(conn_timing.tcp),
-        tls: Some(conn_timing.tls),
-        http_first_byte: Some(http_first_byte),
-        ttft: if t_first > t_req_sent {
-            Some(t_first.duration_since(t_req_sent))
-        } else {
-            None
-        },
-        generation,
-        total: t_end.duration_since(t_start),
-    };
-
-    ProbeResult {
-        n,
-        phases,
-        chars,
-        tokens,
-        error: None,
-    }
+            error: Some(format!("timeout after {}s", args.timeout)),
+        })
 }
 
 // ── Stats + display ─────────────────────────────────────────────────────────
