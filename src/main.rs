@@ -6,9 +6,7 @@ use std::{
 
 use bytes::Bytes;
 use clap::Parser;
-use hickory_resolver::{
-    TokioResolver, config::ResolverConfig, name_server::TokioConnectionProvider,
-};
+use hickory_resolver::{TokioResolver, config::ResolverConfig, net::runtime::TokioRuntimeProvider};
 use http_body_util::BodyExt;
 use hyper::{
     Request, StatusCode,
@@ -165,7 +163,7 @@ async fn dial(
         .lookup_ip(host)
         .await
         .map_err(|e| format!("DNS lookup failed: {e}"))?
-        .into_iter()
+        .iter()
         .collect::<Vec<_>>();
     let ip = *ips.first().ok_or("no DNS records")?;
     let dns = t_dns_start.elapsed();
@@ -476,7 +474,7 @@ fn avg_row(results: &[ProbeResult]) -> Row {
         if values.is_empty() {
             return None;
         }
-        Some(values.into_iter().sum::<Duration>().div_f64(n))
+        Some(values.iter().sum::<Duration>().div_f64(n))
     };
     let total_tokens: usize = results.iter().map(|r| r.tokens).sum();
     let total_gen: Duration = results.iter().filter_map(|r| r.phases.generation).sum();
@@ -548,9 +546,10 @@ async fn main() {
 
     let dns_resolver: TokioResolver = TokioResolver::builder_with_config(
         ResolverConfig::default(),
-        TokioConnectionProvider::default(),
+        TokioRuntimeProvider::default(),
     )
-    .build();
+    .build()
+    .unwrap();
 
     for _ in 0..args.warm {
         let _ = probe_once(&args, &dns_resolver, &*provider, &url, model, 0).await;
