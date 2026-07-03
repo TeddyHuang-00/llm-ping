@@ -250,9 +250,10 @@ async fn read_stream(
 
                         if let SseEvent::Data(data) = next_sse_event(&line) {
                             match provider.parse_chunk(data) {
-                                ContentEvent::Token(content, _is_thinking) => {
+                                ContentEvent::Token(content, is_thinking) => {
                                     log::trace!(
-                                        "token: {}",
+                                        "{}: {}",
+                                        if is_thinking { "thinking" } else { "content" },
                                         content
                                             .replace('\n', "\\n")
                                             .replace('\r', "\\r")
@@ -285,7 +286,8 @@ async fn read_stream(
         let line = String::from_utf8_lossy(&buf);
         if let SseEvent::Data(data) = next_sse_event(&line) {
             match provider.parse_chunk(data) {
-                ContentEvent::Token(content, _is_thinking) => {
+                ContentEvent::Token(content, is_thinking) => {
+                    log::trace!("{}: {}", if is_thinking { "thinking" } else { "content" }, content.replace('\n', "\\n").replace('\r', "\\r").replace('\t', "\\t"));
                     if first_token {
                         t_first_token = Some(Instant::now());
                     }
@@ -635,6 +637,9 @@ async fn main() {
     log::info!("url: {url}");
     log::info!("model: {model}");
     log::info!("prompt: {} chars", args.prompt.len());
+    if let Some(ref p) = args.params {
+        log::info!("params: {p}");
+    }
     if args.warm > 0 {
         log::info!("warmup: {} requests", args.warm);
     }
